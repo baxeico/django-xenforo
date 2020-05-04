@@ -2,6 +2,7 @@ import logging
 
 from django.contrib.auth.backends import RemoteUserBackend
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 from .models import XenforoUser
 
@@ -16,7 +17,7 @@ class UserBackend(RemoteUserBackend):
         except UserModel.DoesNotExist:
             return None
 
-    def authenticate(self, remote_user):
+    def authenticate(self, request, remote_user):
         """
         The username passed as ``remote_user`` is considered trusted.  This
         method simply returns the ``settings.AUTH_USER_MODEL`` object with the given username,
@@ -26,12 +27,15 @@ class UserBackend(RemoteUserBackend):
             return
         username = self.clean_username(remote_user)
         UserModel = get_user_model()
-        user, created = UserModel.objects.get_or_create(username=username)
+        lookup_params = { 'username': username }
+        if settings.SITE_ID:
+            lookup_params['site_id'] = settings.SITE_ID
+        user, created = UserModel.objects.get_or_create(**lookup_params)
         if created:
-            user = self.configure_user(user)
+            user = self.configure_user(request, user)
         return user
 
-    def configure_user(self, user):
+    def configure_user(self, request, user):
         """
         Get some info from Xenforo user and save them on Django user
         """

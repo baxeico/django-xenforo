@@ -12,4 +12,7 @@ setup(
     keywords = ['django', 'xenforo', 'authentication'],
     include_package_data = True,
     zip_safe=False,
+    install_requires=[
+        'phpserialize>=1.3',
+    ]
 )

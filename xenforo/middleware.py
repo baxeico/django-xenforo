@@ -1,60 +1,73 @@
-from socket import inet_ntoa
-from struct import pack
 from time import time
 import logging
 
-from django.db import connections
 from django.conf import settings
-from django.utils.encoding import force_bytes
 
-import phpserialize
-
-from .models import XenforoUser
+from .models import XenforoUser, XenforoSession
 
 logger = logging.getLogger(__name__)
 
 class XFSessionMiddleware(object):
-    def process_request(self, request):
-        request.xf_session_id = request.COOKIES.get(settings.XENFORO['cookie_prefix'] + 'session', None)
-        request.xf_session = None
 
-        if not request.xf_session_id:
-            return
+    def __init__(self, get_response):
+        self.get_response = get_response
+        # One-time configuration and initialization.
 
-        # TODO: pluggable SessionStores
-        cursor = connections[settings.XENFORO['database']].cursor()
-        cursor.execute("SELECT session_id, session_data, expiry_date FROM " + settings.XENFORO['table_prefix'] + "session WHERE session_id = %s AND expiry_date >= %s",
-            [request.xf_session_id, int(time())])
-        row = cursor.fetchone()
-        cursor.close()
+    def __call__(self, request):
+        # Code to be executed for each request before
+        # the view (and later middleware) are called.
 
-        if row:
-            request.xf_session = phpserialize.loads(force_bytes(row[1]), object_hook=phpserialize.phpobject)
+        if 'xenforo_username' not in request.session:
+            xf_session_id = request.COOKIES.get(settings.XENFORO['cookie_prefix'] + 'session', None)
+
+            request.xf_session = None
+            if xf_session_id:
+                try:
+                    xenforosession = XenforoSession.objects.using(settings.XENFORO['database']).get(pk=xf_session_id, expiry_date__gte=int(time()))
+                except XenforoSession.DoesNotExist:
+                    pass
+                else:
+                    request.xf_session = xenforosession.get_session_data()
+
+        response = self.get_response(request)
+
+        # Code to be executed for each request/response after
+        # the view is called.
+
+        return response
+
 
 class XFRemoteUserMiddleware(object):
-    def process_request(self, request):
-        assert hasattr(request, 'xf_session'), "The XenForo authentication middleware requires the XF session middleware to be installed."
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        # One-time configuration and initialization.
+
+    def __call__(self, request):
+        # Code to be executed for each request before
+        # the view (and later middleware) are called.
 
         if 'xenforo_username' in request.session:
             request.META['REMOTE_USER'] = request.session['xenforo_username']
-            return
+        else:
+            assert hasattr(request, 'xf_session'), "The XFRemoteUserMiddleware middleware requires the XFSessionMiddleware middleware to be installed."
+            try:
+                lookup_user_id = int(request.xf_session.get(b'userId'))
+            except:
+                pass
+            else:
+                try:
+                    xenforouser = XenforoUser.objects.using(settings.XENFORO['database']).get(pk=lookup_user_id)
+                except XenforoUser.DoesNotExist:
+                    pass
+                else:
+                    if xenforouser.user_state == 'valid' and xenforouser.is_banned == '0':
+                        request.META['REMOTE_USER'] = xenforouser.username
+                        request.session['xenforo_username'] = xenforouser.username
 
-        if not request.xf_session:
-            return
+        response = self.get_response(request)
 
-        if 'userId' not in request.xf_session:
-            return
+        # Code to be executed for each request/response after
+        # the view is called.
 
-        try:
-            lookup_user_id = int(request.xf_session.get('userId'))
-        except:
-            return
-
-        try:
-            xenforouser = XenforoUser.objects.using(settings.XENFORO['database']).get(pk=lookup_user_id)
-        except XenforoUser.DoesNotExist:
-            return
-
-        if xenforouser.user_state == 'valid' and not xenforouser.is_banned:
-            request.META['REMOTE_USER'] = xenforouser.username
-            request.session['xenforo_username'] = xenforouser.username
+        return response
