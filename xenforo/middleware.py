@@ -61,7 +61,7 @@ class XFRemoteUserMiddleware(object):
                 except XenforoUser.DoesNotExist:
                     pass
                 else:
-                    if xenforouser.user_state == 'valid' and not xenforouser.is_banned:
+                    if xenforouser.user_state == 'valid' and xenforouser.is_banned not in (True, '1'):
                         request.META['REMOTE_USER'] = xenforouser.username
                         request.session['xenforo_username'] = xenforouser.username
 
