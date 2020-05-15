@@ -47,5 +47,7 @@ class UserBackend(RemoteUserBackend):
             user.email = xenforouser.email
             user.is_superuser = xenforouser.is_admin
             user.is_staff = xenforouser.is_staff
+            if hasattr(user, 'xenforo_id'):
+                user.xenforo_id = xenforouser.id
             user.save()
         return user
